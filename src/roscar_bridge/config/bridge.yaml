@@ -1,0 +1,97 @@
+roscar_bridge:
+  ros__parameters:
+    # ── 串口 ──
+    # 用 udev 规则绑的固定名字（对接手册 2.4），不要写 /dev/ttyUSB0 ——
+    # 那个编号取决于插入顺序，再插一个 USB 转串口（激光雷达常用）就会变。
+    port: /dev/roscar
+    baudrate: 115200
+    # 板子复位后不响应的时间上限：3s 上电延时 + 约 5s 陀螺零偏标定。
+    # ⚠ 手册写「大约 8 秒」，**实测 8.47 秒** —— 卡 8.0 会刚好错过，
+    # 然后开遥测的帧被丢光，现象是「[DATA] 在刷但 /odom 一个点都不出」。
+    # 这是**兜底值不是等待值**：节点盯着「[SYS] 就绪」，看到就立刻走，
+    # 板子本来就在跑时也会立刻走。只有板子真起不来才耗满。
+    startup_wait_s: 15.0
+    # true = open 之前把 DTR/RTS 置低，**试图**压住板子复位。
+    # 能不能压住取决于板子的自动复位电路，得实测（对接手册 1.2）。
+    # 默认 false：让板子复位是确定的行为，比「有时候复位有时候不复位」好排查。
+    toggle_dtr: false
+
+    # ── 话题与坐标系 ──
+    cmd_vel_topic: /cmd_vel
+    odom_topic: /odom
+    imu_topic: /imu/data
+    odom_frame: odom
+    base_frame: base_link
+    publish_tf: true
+    publish_imu: true
+    # odom→base_link TF 的广播频率。为什么远高于里程计的 5Hz：
+    # 雷达帧到达 slam 时比它自己的时间戳旧约 95ms（实测中位值），而 5Hz 的
+    # 里程计每 200ms 才有一拍 TF —— 直接照抄频率的话，约 1/3~1/2 的雷达帧
+    # 到达时最后一拍 TF 已经比它的戳还旧，查不到能包住其时间戳的样本，
+    # tf2 会把它们挂成 pending 等待请求；pending 一多就会踩中 tf2
+    # MessageFilter/BufferCore 的锁序死锁（slam 卡死、服务不响应、
+    # 地图不再更新、线程全部 0% CPU，Ctrl+C 也杀不掉）。
+    # 50Hz 把 TF 时间轴铺密 —— 位姿本身还是 5Hz 的，只是反复广播，
+    # 不引入新信息。⚠ 别为了「省 CPU」把它调回 5Hz 附近，也别设成 0
+    # （会被钳到 1Hz）。
+    tf_rate_hz: 50.0
+
+    # ── 下行：转发频率与看门狗（对接手册 4.4）──
+    # nav2 以 20Hz 发 cmd_vel，但不需要 20Hz 转给板子：车最高 30cm/s，
+    # 5Hz 就是每 6cm 更新一次目标，底盘的闭环本来就是 50ms 自己在跑。
+    # 20Hz 转发会让每秒 20 行 [CMD] 回显把串口和日志都吃掉。
+    forward_hz: 5.0
+    # 超过这个时间没有新的 cmd_vel → 发 0x02 急停。
+    # 这就是「节点崩了 / 香橙派断电，车自己停」的那条看门狗。
+    cmd_timeout_ms: 500.0
+    # 每条 0x01 帧自带的时长。板子到点自己停车 —— 免费的看门狗。
+    duration_ms: 500
+    # 满油门。必须和固件 CHASSIS_MAX_SPEED_CM_S / PROTO_* 一致（手册 1.4）。
+    v_full_scale_mm_s: 300.0
+    w_full_scale_mrad_s: 5000.0
+
+    # ── 启动时开哪些上报（对接手册 0.2）──
+    # ⚠ 三路关键遥测默认是关的，而且开关不落盘 —— 每次上电都要由这个节点重新打开。
+    # 漏了的现象是「链路明明通着（[DATA] 在刷），但 /odom 一个点都不出」。
+    enable_odom_stream: true   # 0x28 → [ODOM] DATA
+    enable_att_stream: true    # 0x25 → [ATT] DATA
+    # 0x21 → [IMU] DATA。publish_imu 需要它来填 angular_velocity /
+    # linear_acceleration —— [ATT] 只给姿态角，填不满 sensor_msgs/Imu。
+    enable_imu_stream: true
+    # 0x2D → [DATA] enc_l/speed_l/pwm_l...。调参用的，导航时关掉省带宽。
+    enable_data_stream: false
+
+    # ── 底盘标定（阶段三 任务4）──
+    # 里程计距离刻度 = 0x2A，固件 ODOM_DIST_SCALE。**1.0 = 未标定**，
+    # 不是「正确的默认值」—— 出厂就是这个数，走 1 米可能报成 90cm。
+    #
+    # ⚠ 板子上的这个值存不存得住，手册没写。所以本节点**每次板子就绪都重发一遍**，
+    #    标定值以这里的为准 —— 板子复位多少次都不会丢。
+    # 改它（不用重起节点）：ros2 param set /roscar_bridge dist_scale 1.083
+    # ⚠ 必须带小数点。写成 `1` 会被 ROS 当成整数拒绝，报
+    #   「Wrong parameter type, expected 'Type.DOUBLE' got 'Type.INTEGER'」——
+    #   这是 ROS 参数系统的类型检查，不是节点的问题。写 `1.0`。
+    # 标定方法：归零 → 推车走一段实测距离 → 新刻度 = 旧刻度 × 真实距离 ÷ 报的距离
+    # 回读：看 [ODOM] DATA 那行里的 scale=
+    # 范围 0.2 ~ 5.0，和固件 ODOM_DIST_SCALE_MIN/MAX 一致，超了 param set 会直接报错。
+    dist_scale: 1.087
+
+    # ── 协方差（对接手册 4.3：不要留全零）──
+    # 全零在 ROS 里的意思是「这个测量完全精确」，滤波器会把它当真值 ——
+    # 比给个诚实的大数更糟。这几个都是**量级估计，不是标定值**，
+    # 跑起来之后按实际漂移调。
+    pose_cov_xy: 0.0025        # (5 cm)²  —— 刻度标定后应该能进 5cm 量级
+    pose_cov_yaw: 0.01         # (≈5.7°)² —— 陀螺零偏约 1.2°/min，随时间涨
+    twist_cov_vx: 0.01         # (0.1 m/s)²
+    twist_cov_wz: 0.01
+    # 平面机器人：z / roll / pitch 不可观测，按惯例给个大数。
+    cov_unobservable: 1000000.0
+
+    # ── 日志 ──
+    # 把板子的 [SYS] / [ERR] / [FRM] / [YAW] / [ODOM] 转进 ROS 日志。
+    # [CMD]（每条 0x01 的回显）和 [DATA] 不转 —— 5Hz 转发下会把日志刷满。
+    # [ODOM] **只转非 DATA 的行**：启动横幅那句「距离刻度 = x.xxxx」是回读
+    # 刻度的最直接手段，而 5Hz 的 [ODOM] DATA 会刷屏，代码里单独排除了。
+    log_board_lines: true
+    # 启动这么久还没收到 [ODOM] DATA 就警告一次，直接指向最可能的原因。
+    no_telemetry_warn_s: 12.0

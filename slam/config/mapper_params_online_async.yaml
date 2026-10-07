@@ -1,0 +1,102 @@
+# =============================================================================
+# mapper_params_online_async.yaml — 本车（差速，YDLIDAR X3）在线建图
+# =============================================================================
+# 本车 TF 链: map→odom (slam_toolbox), odom→base_link (roscar_bridge, 50Hz),
+#             base_link→laser (xc_urdf)。没有 base_footprint 这一层 —— 本车
+#             base_link 就在地面高度（两驱动轮轴心中点），等价于别人的 footprint。
+#
+# ⚙ 本文件按「香橙派上省 CPU」整过一轮（症状：越跑越慢、图不更新、终端不报错）：
+#     扫描处理 ≤1Hz（throttle 4 + interval 1.0）
+#     匹配搜索量 ≈ 一半（search_space 0.8→0.6）
+#     地图重算 1/3 频（update_interval 1.0→3.0）
+#     节点更稀（0.5m / 0.4rad）、回环范围收窄
+#   全撤回去：throttle 1 · interval 0.25 · update 1.0 · search 0.8 · 0.3/0.3
+#   还不够就只剩两招：resolution 0.05→0.07（图变粗）或把 rviz2 挪下这块板子
+#   （同机渲染往往才是大头）。
+#
+# 没实车验证过的数值先按 slam_toolbox 常用值跑，验证后再微调；帧名、量程、
+# 刷新率这类明显与本车不符的已按实测改掉（见行内注释）。
+#
+# 用法（免编译目录，launch 按路径启动；参数文件与 use_sim_time 都写在 launch 里，
+# 不用手敲 —— 参数名多个下划线 launch 不报错、静默用默认值，手敲风险高）:
+#   ros2 launch /home/orangepi/ros2_car/slam/launch/slam_toolbox_online_async.launch.py
+#
+# 存图（建图还跑着时调，两个都要）:
+#   ros2 service call /slam_toolbox/save_map slam_toolbox/srv/SaveMap \
+#     "{name: {data: '/home/orangepi/ros2_car/slam/maps/room'}}"        # → room.pgm + room.yaml
+#   ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph \
+#     "{filename: '/home/orangepi/ros2_car/slam/maps/room'}"             # → room.posegraph + room.data
+# ⚠ 定位（nav_with_map）加载的是 serialize_map 那份 .posegraph/.data。
+# =============================================================================
+
+slam_toolbox:
+  ros__parameters:
+
+    # ---- Solver ----
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ---- ROS Frame & Topic ----
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link            # 本车 TF 里只有 base_link（没有 base_footprint 层）
+    scan_topic: /scan
+    use_map_saver: true
+    mode: mapping
+
+    # ---- General ----
+    debug_logging: false
+    throttle_scans: 4                    # 省 CPU：每 4 帧取 1 帧
+    transform_publish_period: 0.05       # map→odom TF 20Hz（原 50Hz；rviz 里看仍顺，省一点广播）
+    map_update_interval: 3.0             # 省 CPU：地图 3 秒重算/发布一次（rviz 里 3 秒刷一屏属正常）
+    resolution: 0.05                     # 5cm 栅格（最后才动它，见文件头）
+    min_laser_range: 0.1
+    max_laser_range: 12.0                # X3 实际量程没 64m（驱动 yaml 里那个是出厂值），收远了全是噪点
+    minimum_time_interval: 1.0           # 省 CPU：扫描处理 ≤1Hz。车速 ≤0.3m/s，两次匹配间
+                                         # 走 ≤0.3m < 搜索窗 0.6m，够用；转圈多/嫌糙改回 0.5
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    stack_size_to_use: 40000000
+    enable_interactive_mode: false       # 关交互式标记，省一点；要在 rviz 里拖节点纠错就改 true
+
+    # ---- 前端扫描匹配 (Front-End Scan Matching) ----
+    use_scan_matching: true
+    use_scan_barycenter: true
+    minimum_travel_distance: 0.5
+    minimum_travel_heading: 0.4
+    scan_buffer_size: 6
+    scan_buffer_maximum_scan_distance: 12.0     # 与 X3 实际量程一致
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+
+    # ---- 闭环检测 (Loop Closure) ----
+    do_loop_closing: true
+    loop_search_maximum_distance: 2.0
+    loop_match_minimum_chain_size: 10    # ⚠ 调小 = 回环触发更勤 = 反而费 CPU，往大调才是省
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+
+    # ---- 前端相关性搜索窗 (Correlation Search) ----
+    correlation_search_space_dimension: 0.6   # 省 CPU：匹配搜索量按面积缩；也意味着抗打滑余量只剩 0.6m
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    # ---- 闭环相关性搜索窗 (Loop Closure Correlation) ----
+    loop_search_space_dimension: 5.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # ---- 扫描匹配惩罚 (Scan Matcher Penalties) ----
+    distance_variance_penalty: 0.3
+    angle_variance_penalty: 0.5
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.5
+    minimum_distance_penalty: 0.1
+    use_response_expansion: true

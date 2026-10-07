@@ -1,0 +1,274 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="xc_urdf">
+  <!-- Keep base_link as the navigation frame; rotate only the CAD model for RViz. -->
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="-0.00197167480169581 -0.000122347580332399 0.00828700108635093"
+        rpy="0 0 0" />
+      <mass
+        value="1.38347431367086" />
+      <inertia
+        ixx="0.00146738564724886"
+        ixy="-3.42395260263996E-06"
+        ixz="-1.50060721917905E-05"
+        iyy="0.00272256204808231"
+        iyz="2.6934971330369E-06"
+        izz="0.00387596146259179" />
+    </inertial>
+  </link>
+  <link
+    name="xc_model_link">
+    <visual>
+      <origin
+        xyz="0 0 0.11"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://xc_urdf/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0.11"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://xc_urdf/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="base_to_xc_model"
+    type="fixed">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 3.141592653589793" />
+    <parent
+      link="base_link" />
+    <child
+      link="xc_model_link" />
+  </joint>
+  <link
+    name="Empty_Link1">
+    <inertial>
+      <origin
+        xyz="-7.62788679442572E-10 0.00158038832427439 0.00599232695785889"
+        rpy="0 0 0" />
+      <mass
+        value="0.0272846657527921" />
+      <inertia
+        ixx="4.07334324951061E-06"
+        ixy="3.91827579527818E-14"
+        ixz="3.98509869637933E-13"
+        iyy="3.82468808639562E-06"
+        iyz="-5.10828322956161E-07"
+        izz="2.61087120188963E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://xc_urdf/meshes/Empty_Link1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://xc_urdf/meshes/Empty_Link1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="L1"
+    type="fixed">
+    <origin
+      xyz="0.0769999999999979 0.0334999999999998 0.0175"
+      rpy="0 0 0" />
+    <parent
+      link="xc_model_link" />
+    <child
+      link="Empty_Link1" />
+    <axis
+      xyz="0 0 1" />
+  </joint>
+  <link
+    name="Empty_Link2">
+    <inertial>
+      <origin
+        xyz="7.6278881822045E-10 -0.00158038832427439 0.00599232695785888"
+        rpy="0 0 0" />
+      <mass
+        value="0.0272846657527921" />
+      <inertia
+        ixx="4.0733432495106E-06"
+        ixy="3.91827703134016E-14"
+        ixz="-3.98509904538453E-13"
+        iyy="3.82468808639562E-06"
+        iyz="5.10828322956161E-07"
+        izz="2.61087120188962E-06" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://xc_urdf/meshes/Empty_Link2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.898039215686275 0.917647058823529 0.929411764705882 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://xc_urdf/meshes/Empty_Link2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LR1"
+    type="fixed">
+    <origin
+      xyz="0.076999999999998 -0.0334999999999996 0.0175"
+      rpy="0 0 0" />
+    <parent
+      link="xc_model_link" />
+    <child
+      link="Empty_Link2" />
+    <axis
+      xyz="0 0 1" />
+  </joint>
+  <link
+    name="Empty_Link3">
+    <inertial>
+      <origin
+        xyz="3.19437892623564E-07 -8.93711913050599E-05 2.30903450500544E-07"
+        rpy="0 0 0" />
+      <mass
+        value="0.0758772106233843" />
+      <inertia
+        ixx="2.14000230411095E-05"
+        ixy="-8.97611419511614E-12"
+        ixz="-7.09406194543137E-10"
+        iyy="3.71665775309804E-05"
+        iyz="5.99767599321799E-12"
+        izz="2.14003516816011E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://xc_urdf/meshes/Empty_Link3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://xc_urdf/meshes/Empty_Link3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="LB2"
+    type="fixed">
+    <origin
+      xyz="-0.0650000000000016 0.09 0.0365"
+      rpy="0 0 0" />
+    <parent
+      link="xc_model_link" />
+    <child
+      link="Empty_Link3" />
+    <axis
+      xyz="0 -1 0" />
+  </joint>
+  <link
+    name="Empty_Link4">
+    <inertial>
+      <origin
+        xyz="2.89018891222459E-07 2.6800196192096E-07 -8.93711913050599E-05"
+        rpy="0 0 0" />
+      <mass
+        value="0.0758772106233844" />
+      <inertia
+        ixx="2.14000664475817E-05"
+        ixy="-7.1807948817931E-10"
+        ixz="4.12261279556443E-12"
+        iyy="2.14003082751291E-05"
+        iyz="-9.977314567107E-12"
+        izz="3.71665775309805E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://xc_urdf/meshes/Empty_Link4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.298039215686275 0.298039215686275 0.298039215686275 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://xc_urdf/meshes/Empty_Link4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="RB2"
+    type="fixed">
+    <origin
+      xyz="-0.0650000000000015 -0.0900000000000001 0.0365"
+      rpy="1.5707963267949 0 0" />
+    <parent
+      link="xc_model_link" />
+    <child
+      link="Empty_Link4" />
+    <axis
+      xyz="0 0 -1" />
+  </joint>
+</robot>

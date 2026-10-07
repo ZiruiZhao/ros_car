@@ -1,0 +1,108 @@
+# 仿真验证用参数：与本车 config/mapper_params_online_async.yaml 同源，只把 scan_topic
+# 指向仿真的 /sim_scan，这样不动真雷达也能验证 slam 行为。配套 simcar.py。
+# slam_toolbox 在线异步建图参数（阶段一 · 生成地图）。
+#
+# 骨架 = 官方 mapper_params_online_async.yaml（apt 装的 Humble 2.6.10 自带那份，
+# 和 GitHub SteveMacenski/slam_toolbox 仓库 ros2 分支的 launch/config 同源），
+# 本车改过的地方都标了「本车」，其余保持官方默认。键名有疑问以官方那份为准：
+#   /opt/ros/humble/share/slam_toolbox/config/mapper_params_online_async.yaml
+#
+# 用法（配合假车；~ 不会被 shell 展开，路径写全）：
+#   1. 先起假车（另开一个终端；tf_hz 给 50 复刻桥接节点补发 TF 的现状）：
+#      ROS_LOCALHOST_ONLY=1 python3 /home/orangepi/ros2_car/slam/sim/simcar.py \
+#        --ros-args -p tf_hz:=50.0
+#   2. 再起 slam（用本文件顶掉默认参数；硬件层不用起，scan 由假车发）：
+#      ros2 launch /home/orangepi/ros2_car/slam/launch/slam_nav.launch.py \
+#        use_rviz:=false \
+#        slam_params_file:=/home/orangepi/ros2_car/slam/sim/sim_slam_params.yaml
+#
+# ⚠ use_sim_time 不要显式传 true —— slam 节点会一直等仿真时钟 /clock，等于不干活。
+#   （launch 里已写死 false，正常不用管；命令行手敲时最容易把这个敲错。）
+# ⚠ 参数名写错（比如 use_simtime、slamparams_file）launch **不报错**，静默用默认值 ——
+#   现象是本参数文件整份没生效，而且 use_sim_time 还是 'true'。实测踩过一次。
+#
+# ⚠ 启动顺序：**无所谓，随便起。** 曾经写在这里的「必须先起 slam、等 15 秒再起
+#   bringup，否则节点半死」已被实测证伪（按该顺序起照样卡死）。卡死的真正根因是
+#   tf2 的锁序缺陷，触发条件是雷达帧到达时查不到能包住其时间戳的 odom→base_link TF
+#   （实测 36% 的帧撞上）—— 现在桥接节点以 50Hz 补发该 TF（bridge.yaml 的
+#   tf_rate_hz），触发条件不复存在。细节见 slam/README.md 阶段一。
+#
+# 存图（建图还跑着时调，两个都要调，作用不同，别漏第二个）：
+#   ros2 service call /slam_toolbox/save_map slam_toolbox/srv/SaveMap \
+#     "{name: {data: '/home/orangepi/ros2_car/slam/maps/room'}}"        # → room.pgm + room.yaml
+#   ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph \
+#     "{filename: '/home/orangepi/ros2_car/slam/maps/room'}"             # → room.posegraph + room.data
+#
+# ⚠ 阶段二定位加载的是 **.posegraph/.data**（serialize_map 那份）；只存了 pgm/yaml 的话
+#   定位起不来。
+
+slam_toolbox:
+  ros__parameters:
+
+    # ── 求解器：官方默认，别动 ──
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ── ROS 参数 ──
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link          # 本车：官方默认 base_footprint，本车 TF 里只有 base_link
+    scan_topic: /sim_scan   # 仿真验证：不吃真雷达的 /scan
+    use_map_saver: true            # 支持 /slam_toolbox/save_map 服务（存 pgm+yaml）
+    mode: mapping
+
+    debug_logging: false
+    throttle_scans: 1              # /scan 约 12Hz 全收，不打折
+    transform_publish_period: 0.02 # map→odom 按 50Hz 发，rviz 里才顺
+    map_update_interval: 2.0       # 本车：官方 5.0，图刷新快一点肉眼可见
+    resolution: 0.05               # 5cm 栅格
+    min_laser_range: 0.1           # 与 X3 驱动的 range_min 一致（写 0.0 会触发 slam 的告警）
+    max_laser_range: 12.0          # 本车：官方 20.0；X3 实际量程没这么远，收进来都是噪点
+    minimum_time_interval: 0.5
+    transform_timeout: 0.2         # 恢复官方默认。曾为绕卡死改 0.5，方向错了：真正的问题
+                                   # 不是「等得不够久」而是 TF 时间轴太稀（桥接已 50Hz 补发）
+    tf_buffer_duration: 30.
+    stack_size_to_use: 40000000
+    enable_interactive_mode: true  # rviz 里可拖节点纠错
+
+    # ── 扫描匹配 ──
+    use_scan_matching: true
+    use_scan_barycenter: true
+    minimum_travel_distance: 0.1   # 本车：官方 0.5；遥控 0.15m/s，0.5 太稀
+    minimum_travel_heading: 0.2    # 本车：官方 0.5
+    scan_buffer_size: 10
+    scan_buffer_maximum_scan_distance: 10.0
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+    loop_search_maximum_distance: 3.0
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 10
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+
+    # ── 相关性搜索：官方默认 ──
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    # ── 回环搜索：官方默认 ──
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # ── 各项惩罚：官方默认 ──
+    distance_variance_penalty: 0.5
+    angle_variance_penalty: 1.0
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true
+    min_pass_through: 2
+    occupancy_threshold: 0.1

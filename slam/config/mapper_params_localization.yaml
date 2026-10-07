@@ -1,0 +1,89 @@
+# =============================================================================
+# mapper_params_localization.yaml — 本车（差速，YDLIDAR X3）定位模式
+# =============================================================================
+# 加载建图时用 /slam_toolbox/serialize_map 存出来的 .posegraph/.data 做定位，
+# 替代原 AMCL 方案（不再需要 map_server + amcl）。
+#
+# ⚠ 跑之前必须满足（源码级硬性要求，缺一个直接报错不加载）:
+#   1. map_file_name 指向 .posegraph/.data 的公共前缀（不带扩展名）；
+#   2. map_start_pose 给出「车现在摆在哪」的 [x, y, yaw]。
+# 通过 nav_with_map.launch.py / localization.launch.py 启动时，这两项会被
+# launch 参数 map:= / map_x:= / map_y:= / map_yaw:= 覆盖，不必手改本文件。
+# =============================================================================
+
+slam_toolbox:
+  ros__parameters:
+
+    # ---- Solver ----
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ---- ROS Frame & Topic ----
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link            # 本车 TF 里只有 base_link（没有 base_footprint 层）
+    scan_topic: /scan
+    # 说明: mode 参数实际不被节点读取 —— 建图/定位由启动哪个可执行文件决定
+    # (async_slam_toolbox_node vs localization_slam_toolbox_node)。
+    mode: localization
+
+    # ---- 地图加载 ----
+    # 默认地图与 slam_toolbox 的 serialize_map 输出对应（不带扩展名）。
+    map_file_name: /home/orangepi/ros2_car/slam/maps/slam_toolbox_map
+    map_start_pose: [0.0, 0.0, 0.0]
+
+    # ---- General ----
+    debug_logging: false
+    throttle_scans: 1
+    transform_publish_period: 0.02
+    map_update_interval: 5.0             # 定位模式地图不用频繁更新
+    resolution: 0.05
+    min_laser_range: 0.1
+    max_laser_range: 12.0
+    minimum_time_interval: 0.25
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    stack_size_to_use: 40000000
+
+    # ---- 前端扫描匹配 ----
+    use_scan_matching: true
+    use_scan_barycenter: true
+    minimum_travel_distance: 0.3
+    minimum_travel_heading: 0.3
+    scan_buffer_size: 10                 # 定位需要充足参考帧
+    scan_buffer_maximum_scan_distance: 12.0
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+
+    # ---- 闭环检测 ----
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 5     # 减少误闭环
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+
+    # ---- 前端相关性搜索窗 ----
+    # 定位模式搜索窗更大: 初始位置可能不准确，机器人可能被搬动
+    correlation_search_space_dimension: 1.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    # ---- 闭环相关性搜索窗 ----
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+    loop_search_maximum_distance: 3.0
+
+    # ---- 扫描匹配惩罚 ----
+    distance_variance_penalty: 0.3
+    angle_variance_penalty: 0.5
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.5
+    minimum_distance_penalty: 0.1
+    use_response_expansion: true

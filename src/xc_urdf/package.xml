@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>xc_urdf</name>
+  <version>0.0.0</version>
+  <description>ROS2 robot description package for the XC car model.</description>
+  <maintainer email="hyt@todo.todo">hyt</maintainer>
+  <license>BSD</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <!-- xacro：display.launch.py 里在 launch 进程内展开 urdf -->
+  <exec_depend>xacro</exec_depend>
+  <!-- 驱动轮是 continuous 关节，没有 /joint_states 它们在 TF 里没有位姿 -->
+  <exec_depend>joint_state_publisher</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

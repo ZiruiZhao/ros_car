@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>roscar_bringup</name>
+  <version>0.0.0</version>
+  <description>一键启动香橙派侧全套：串口桥接 + 机器人模型 + 激光雷达。</description>
+  <maintainer email="hyt@todo.todo">hyt</maintainer>
+  <license>BSD</license>
+
+  <!-- 这个包一行代码都没有，只有 launch 文件，所以只要 ament_cmake 就够了 -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <!-- 被 include 的三条 launch 所属的包 -->
+  <exec_depend>roscar_bridge</exec_depend>
+  <exec_depend>xc_urdf</exec_depend>
+  <exec_depend>ydlidar_ros2_driver</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

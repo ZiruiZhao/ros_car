@@ -1,0 +1,320 @@
+<?xml version="1.0"?>
+<!-- ============================================================================
+  xc_urdf —— 小车机器人模型
+
+  这份是从 SolidWorks 导出的 xc_urdf.urdf 改写来的。改写只动了三件事：
+
+    1. 朝向摆正。SolidWorks 原件在 base_link→车体 那个关节上加了 180° 旋转，
+       但实车大轮在后、CAD 里大轮也在 x<0，两边本来就一致，转 180° 反而把车
+       转反了。现在 rpy 全 0。
+    2. base_link 挪到两个驱动轮的轴心正下方（地面上）。桥接节点发的
+       odom→base_link 里 z 恒为 0，固件也是按「两驱动轮轴心中点」做航位推算的，
+       base_link 必须落在这个点上，rviz 里的运动才和固件报的对得上。
+    3. 补了 laser 帧。雷达 /scan 打的就是这个 frame_id，而 ydlidar 驱动不发 TF，
+       这个变换只能由这里出。
+
+  尺寸一个都没有改，全部来自 CAD 的关节坐标。
+
+  ── link 名对照（SolidWorks 导出时没命名，所以原文件里叫 Empty_LinkN）──
+
+    chassis             ← xc_model_link   + meshes/base_link.STL
+    wheel_left          ← Empty_Link3     + meshes/Empty_Link3.STL
+    wheel_right         ← Empty_Link4     + meshes/Empty_Link4.STL
+    front_wheel_left    ← Empty_Link1     + meshes/Empty_Link1.STL
+    front_wheel_right   ← Empty_Link2     + meshes/Empty_Link2.STL
+
+  mesh 文件名保持原样没改：以后要是重新从 SolidWorks 导出，文件名会照旧，
+  直接覆盖 meshes/ 就能用，不用改这份 xacro。
+
+  ── 轴向约定（REP-103，跟固件一致）──
+
+    x 朝车头、y 朝左、z 朝上；yaw 正 = 左转。
+    车头是装小轮那一头，大轮在车尾。
+============================================================================ -->
+
+<robot name="xc_urdf" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ==========================================================================
+       物理参数：量完改这里，整个模型跟着变
+       ========================================================================== -->
+
+  <!-- ── 后驱动轮（差速轮，一对）────────────────────────────────────────────── -->
+  <xacro:property name="wheel_radius"     value="0.0315"/>  <!-- 半径。CAD 实测直径 63mm -->
+  <xacro:property name="wheel_width"      value="0.023"/>   <!-- 轮宽 23mm -->
+  <xacro:property name="wheel_separation" value="0.180"/>   <!-- 左右轮中心距 = 轮距。
+                                                                 文档里长期标着「没测过」，
+                                                                 这是 CAD 里的值，仍建议推车复核 -->
+
+  <!-- ── 前小轮（一对，从动）────────────────────────────────────────────────── -->
+  <xacro:property name="front_wheel_radius" value="0.0125"/> <!-- 滚动半径。轴心离地 12.5mm -->
+  <xacro:property name="front_wheel_x"      value="0.142"/>  <!-- 在轴心中点前面的距离 -->
+  <xacro:property name="front_wheel_y"      value="0.0335"/> <!-- 左右各偏多少 -->
+
+  <!-- ── base_link 的原点位置 ──────────────────────────────────────────────────
+       定在「两驱动轮轴心连线的中点」的**正下方地面上**。x/y 直接为 0（轴心就是
+       原点），唯一需要换算的是 CAD 坐标系相对它的偏移。                        -->
+  <xacro:property name="chassis_offset_x" value="0.065"/>   <!-- CAD 原点在 base_link 的 +x 方 -->
+  <xacro:property name="chassis_offset_z" value="-0.005"/>  <!-- CAD 原点比地面低 5mm -->
+
+  <!-- ── 激光雷达安装位置 ──────────────────────────────────────────────────────
+       五个数都是相对 base_link 原点（两驱动轮轴心中点、地面）：
+         x     前后，前为正
+         y     左右，左为正，装正中填 0
+         z     离地高度，量到**雷达的中心**（不是底面）。这一位决定激光的扫描平面，
+               车周围比它低的东西雷达看不见
+         roll  绕 x 轴转了多少。雷达是**倒扣**装的，所以是 180°
+         yaw   0° 朝向相对车头转了多少，左转为正（线缆朝车尾一般是 0）
+
+       下面这几个数是拿 base_link.STL 反解出来的，不是估的：把整车每 5mm 横切一刀，找
+       每一层上的圆，**全车只有一处是干净的圆** ——
+         圆心 (95.6, 0)mm，Ø64，z 从 94 挂到 121
+       它就吊在底盘上层平板底下（平板底面正好 121），下面 78.5mm 还有一层板，中间
+       94~78.5 是空的 —— 所以这根圆柱确实是「贴在上面平板」悬着的，正对上实物。
+
+         x = 0.0956    CAD 那根圆的轴心
+         y = 0.0       正好居中
+         z = 0.1075    (94+121)/2，取圆柱中点当光心。这一位决定激光的扫描平面高度
+
+       ⚠ CAD 那根是 **Ø64 × 27mm**，X3 标称 **Ø76 × 41mm**，对不上 —— 它多半是简化件、
+         或者只画了转动头。所以 x/y 可信，**z 只能算估的**。判据：正前方摆个矮纸箱，
+         看点云打不打得到它；偏了就把 laser_z 加几毫米，重新 colcon build。
+       ⚠ 罩着它的那几根螺柱顶在 110.5mm，跟雷达腰齐平，会挡掉点云上几条扇区。
+         那是真遮挡，不是驱动或网络出问题。
+
+       ⚠ roll = 180° 是「倒扣安装」的补偿，**这个值对不对只能拿实车验**：正前方放个
+         纸箱，看 rviz 里点云是不是也在正前方。整体差 180° 的话，把 roll 换成 pitch
+         （改成 0 ${pi} 那一格），别去动 yaw。
+         注意这和教程「雷达倒置」那节讲的不是一回事 —— 那节是**驱动层**的开关
+         （reversion / inverted），这里是**安装姿态**。
+
+       以后挪动雷达安装位置，改这几个数再重新 colcon build 即可。              -->
+  <xacro:property name="laser_x"    value="0.0956"/>
+  <xacro:property name="laser_y"    value="0.0"/>
+  <xacro:property name="laser_z"    value="0.1075"/>
+  <xacro:property name="laser_roll" value="${pi}"/>
+  <xacro:property name="laser_yaw"  value="0.0"/>
+
+  <!-- ==========================================================================
+       base_link：不画东西的纯参考系
+       ========================================================================== -->
+
+  <link name="base_link"/>
+
+  <!-- ==========================================================================
+       车体：SolidWorks 的 base_link.STL
+       ========================================================================== -->
+
+  <link name="chassis">
+    <visual>
+      <!-- +0.11 是 SolidWorks 原件里就有的视觉偏移，实测正确：加上它轮子才着地 -->
+      <origin xyz="0 0 0.11" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://xc_urdf/meshes/base_link.STL"/>
+      </geometry>
+      <material name="chassis_gray">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.11" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://xc_urdf/meshes/base_link.STL"/>
+      </geometry>
+    </collision>
+    <!-- 惯性块原样搬过来。chassis 的坐标系就是 CAD 坐标系，数字不用换算。
+         注意：这是 SolidWorks 算出来的近似值，拿来做 rviz 可视化足够了；
+         真要上物理仿真得重新标。 -->
+    <inertial>
+      <origin xyz="-0.00197167480169581 -0.000122347580332399 0.00828700108635093" rpy="0 0 0"/>
+      <mass value="1.38347431367086"/>
+      <inertia ixx="0.00146738564724886" ixy="-3.42395260263996E-06" ixz="-1.50060721917905E-05"
+               iyy="0.00272256204808231"   iyz="2.6934971330369E-06"  izz="0.00387596146259179"/>
+    </inertial>
+  </link>
+
+  <joint name="chassis_joint" type="fixed">
+    <origin xyz="${chassis_offset_x} 0 ${chassis_offset_z}" rpy="0 0 0"/>
+    <parent link="base_link"/>
+    <child link="chassis"/>
+  </joint>
+
+  <!-- ==========================================================================
+       后驱动轮 —— 差速转向的两个轮子，可动
+       ========================================================================== -->
+
+  <!-- 左轮 -->
+  <link name="wheel_left">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://xc_urdf/meshes/Empty_Link3.STL"/>
+      </geometry>
+      <material name="wheel_dark">
+        <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://xc_urdf/meshes/Empty_Link3.STL"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0.000000319437892623564 -0.0000893711913050599 0.000000230903450500544" rpy="0 0 0"/>
+      <mass value="0.0758772106233843"/>
+      <inertia ixx="2.14000230411095E-05"  ixy="-8.97611419511614E-12" ixz="-7.09406194543137E-10"
+               iyy="3.71665775309804E-05"  iyz="5.99767599321799E-12"  izz="2.14003516816011E-05"/>
+    </inertial>
+  </link>
+
+  <joint name="wheel_left_joint" type="continuous">
+    <!-- 轴心就在 base_link 原点的正上方一个轮半径处 -->
+    <origin xyz="0 ${wheel_separation/2} ${wheel_radius}" rpy="0 0 0"/>
+    <parent link="base_link"/>
+    <child link="wheel_left"/>
+    <!-- 绕 y 转 = 向前滚。正转车前进，和固件同号 -->
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <!-- 右轮 -->
+  <link name="wheel_right">
+    <visual>
+      <!-- Empty_Link4 的 mesh 是躺着的（圆面在 XY 平面），绕 x 转 90° 立起来。
+           这不是镜像件：实测它就是 Empty_Link3 绕 x 轴转 90° 的结果，尺寸完全对得上。
+           旋转放在 visual/collision 上而不是关节上——关节的 <axis> 是在子连杆
+           坐标系里解释的，转关节会把轴也带歪。 -->
+      <origin xyz="0 0 0" rpy="1.5707963267949 0 0"/>
+      <geometry>
+        <mesh filename="package://xc_urdf/meshes/Empty_Link4.STL"/>
+      </geometry>
+      <material name="wheel_dark">
+        <color rgba="0.298039215686275 0.298039215686275 0.298039215686275 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.5707963267949 0 0"/>
+      <geometry>
+        <mesh filename="package://xc_urdf/meshes/Empty_Link4.STL"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0.000000289018891222459 0.00000026800196192096 -0.0000893711913050599" rpy="0 0 0"/>
+      <mass value="0.0758772106233844"/>
+      <inertia ixx="2.14000664475817E-05"  ixy="-7.1807948817931E-10"  ixz="4.12261279556443E-12"
+               iyy="2.14003082751291E-05"  iyz="-9.977314567107E-12"   izz="3.71665775309805E-05"/>
+    </inertial>
+  </link>
+
+  <joint name="wheel_right_joint" type="continuous">
+    <origin xyz="0 ${-wheel_separation/2} ${wheel_radius}" rpy="0 0 0"/>
+    <parent link="base_link"/>
+    <child link="wheel_right"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <!-- ==========================================================================
+       前小轮 —— 从动，用固定关节
+       现在桥接节点不发单轮转角/转速，所以就算做成可动关节也没有数据可驱动，
+       反而会因为没有 /joint_states 让这两个连杆在 TF 里消失。等以后要接了再改。
+       ========================================================================== -->
+
+  <link name="front_wheel_left">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://xc_urdf/meshes/Empty_Link1.STL"/>
+      </geometry>
+      <material name="front_wheel_gray">
+        <color rgba="0.898039215686275 0.917647058823529 0.929411764705882 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://xc_urdf/meshes/Empty_Link1.STL"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="-0.000000000762788679442572 0.00158038832427439 0.00599232695785889" rpy="0 0 0"/>
+      <mass value="0.0272846657527921"/>
+      <inertia ixx="4.07334324951061E-06" ixy="3.91827579527818E-14" ixz="3.98509869637933E-13"
+               iyy="3.82468808639562E-06" iyz="-5.10828322956161E-07" izz="2.61087120188963E-06"/>
+    </inertial>
+  </link>
+
+  <joint name="front_wheel_left_joint" type="fixed">
+    <origin xyz="${front_wheel_x} ${front_wheel_y} ${front_wheel_radius}" rpy="0 0 0"/>
+    <parent link="base_link"/>
+    <child link="front_wheel_left"/>
+  </joint>
+
+  <link name="front_wheel_right">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://xc_urdf/meshes/Empty_Link2.STL"/>
+      </geometry>
+      <material name="front_wheel_gray">
+        <color rgba="0.898039215686275 0.917647058823529 0.929411764705882 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://xc_urdf/meshes/Empty_Link2.STL"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0.00000000076278881822045 -0.00158038832427439 0.00599232695785888" rpy="0 0 0"/>
+      <mass value="0.0272846657527921"/>
+      <inertia ixx="4.0733432495106E-06"  ixy="3.91827703134016E-14" ixz="-3.98509904538453E-13"
+               iyy="3.82468808639562E-06" iyz="5.10828322956161E-07" izz="2.61087120188962E-06"/>
+    </inertial>
+  </link>
+
+  <joint name="front_wheel_right_joint" type="fixed">
+    <origin xyz="${front_wheel_x} ${-front_wheel_y} ${front_wheel_radius}" rpy="0 0 0"/>
+    <parent link="base_link"/>
+    <child link="front_wheel_right"/>
+  </joint>
+
+  <!-- ==========================================================================
+       激光雷达 —— 这个帧必须存在
+       /scan 的 frame_id 就是 laser，ydlidar 驱动不发 TF，所以只能由这里提供。
+
+       这里**不画雷达本体**。CAD 的 base_link.STL 里已经有一根雷达的圆柱了（就是上面
+       参数注释里那根 Ø64，吊在上层平板底下），再叠一个实心圆柱只是重复，还会跟它
+       叠面闪烁。
+
+       只留一片**薄圆盘**，摆在扫描面上 —— rviz 里真正要看的是「激光打在哪个高度」，
+       这个比雷达长什么样重要得多。圆盘按 X3 真实外径 Ø76 画，比 CAD 那根（Ø64）粗
+       一圈，所以在 rviz 里会从圆柱腰上露出一道细边，正好当扫描面的标记。
+       想让雷达那一带完全干净，把整个 <visual> 删掉即可，帧不受影响。
+       ========================================================================== -->
+
+  <link name="laser">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.038" length="0.002"/>
+      </geometry>
+      <material name="laser_black">
+        <color rgba="0.1 0.1 0.12 1"/>
+      </material>
+    </visual>
+  </link>
+
+  <joint name="laser_joint" type="fixed">
+    <origin xyz="${laser_x} ${laser_y} ${laser_z}" rpy="${laser_roll} 0 ${laser_yaw}"/>
+    <parent link="base_link"/>
+    <child link="laser"/>
+  </joint>
+
+  <!-- ==========================================================================
+       没有 imu_link
+       base_link→imu_link 由 roscar_bridge 的 launch 用 static_transform_publisher
+       发着（全零）。这里再声明一个就会有两个发布者抢同一个变换。
+       等以后量出 MPU6050 的实际安装位置，再把它从桥接包挪到这里来。
+       ========================================================================== -->
+
+</robot>

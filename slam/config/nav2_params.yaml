@@ -1,0 +1,360 @@
+# =============================================================================
+# nav2_params.yaml — 本车（差速，YDLIDAR X3）+ slam_toolbox
+# =============================================================================
+# 全部按本车实况整定，与本车有关的都标了 ⭐ / 行内注释：
+#
+#   1. motion_model: DiffDrive            本车是差速，不能横移（vy 全为 0）
+#   2. 帧名全用 base_link                 本车 TF 里没有 base_footprint 这一层
+#   3. 实测 footprint                     底盘是长方形，四个角从 CAD mesh 量的
+#   4. 速度包线 vx 0.20 / wz 1.2          桥接节点把 cmd_vel 夹在 0.3 m/s 内，留余量
+#   5. controller_frequency 10.0          /odom 只有 5Hz，再高是白烧 CPU；
+#                                         MPPI 的 model_dt 必须等于它的倒数
+#   6. batch_size 1000                    香橙派 CPU 有限，MPPI 采样数减半
+#   7. transform_tolerance 0.3            串口链路有延迟（旧 DWB 配置时量过）
+#   8. 到点容差 0.15 / 0.25               差速车没法侧移修正，放宽一点
+#
+# 设计要点:
+#   * 不启用 AMCL: map→odom TF 由 slam_toolbox 发布
+#   * 不启用 nav2_map_server: /map 由 slam_toolbox 发布
+#   * static_layer 订阅 /map, 用 Transient Local QoS（slam_toolbox 是 latched）
+#   * 规划器 NavfnPlanner: 地图持续变化时比 Smac Hybrid 更鲁棒
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Behavior Tree Navigator
+# -----------------------------------------------------------------------------
+bt_navigator:
+  ros__parameters:
+    use_sim_time: false
+    global_frame: map
+    robot_base_frame: base_link
+    odom_topic: /odom
+    bt_loop_duration: 10
+    default_server_timeout: 20
+    wait_for_service_timeout: 1000
+    # 使用 nav2 默认 BT XML, 含 replanning + recovery
+    plugin_lib_names:
+      - nav2_compute_path_to_pose_action_bt_node
+      - nav2_compute_path_through_poses_action_bt_node
+      - nav2_smooth_path_action_bt_node
+      - nav2_follow_path_action_bt_node
+      - nav2_spin_action_bt_node
+      - nav2_wait_action_bt_node
+      - nav2_assisted_teleop_action_bt_node
+      - nav2_back_up_action_bt_node
+      - nav2_drive_on_heading_bt_node
+      - nav2_clear_costmap_service_bt_node
+      - nav2_is_stuck_condition_bt_node
+      - nav2_goal_reached_condition_bt_node
+      - nav2_goal_updated_condition_bt_node
+      - nav2_globally_updated_goal_condition_bt_node
+      - nav2_is_path_valid_condition_bt_node
+      - nav2_initial_pose_received_condition_bt_node
+      - nav2_reinitialize_global_localization_service_bt_node
+      - nav2_rate_controller_bt_node
+      - nav2_distance_controller_bt_node
+      - nav2_speed_controller_bt_node
+      - nav2_truncate_path_action_bt_node
+      - nav2_truncate_path_local_action_bt_node
+      - nav2_goal_updater_node_bt_node
+      - nav2_recovery_node_bt_node
+      - nav2_pipeline_sequence_bt_node
+      - nav2_round_robin_node_bt_node
+      - nav2_transform_available_condition_bt_node
+      - nav2_time_expired_condition_bt_node
+      - nav2_path_expiring_timer_condition
+      - nav2_distance_traveled_condition_bt_node
+      - nav2_single_trigger_bt_node
+      - nav2_goal_updated_controller_bt_node
+      - nav2_is_battery_low_condition_bt_node
+      - nav2_navigate_through_poses_action_bt_node
+      - nav2_navigate_to_pose_action_bt_node
+      - nav2_remove_passed_goals_action_bt_node
+      - nav2_planner_selector_bt_node
+      - nav2_controller_selector_bt_node
+      - nav2_goal_checker_selector_bt_node
+      - nav2_controller_cancel_bt_node
+      - nav2_path_longer_on_approach_bt_node
+      - nav2_wait_cancel_bt_node
+      - nav2_spin_cancel_bt_node
+      - nav2_back_up_cancel_bt_node
+      - nav2_assisted_teleop_cancel_bt_node
+      - nav2_drive_on_heading_cancel_bt_node
+      - nav2_is_battery_charging_condition_bt_node
+
+# -----------------------------------------------------------------------------
+# Controller Server (MPPI, 差速)
+# -----------------------------------------------------------------------------
+controller_server:
+  ros__parameters:
+    use_sim_time: false
+    controller_frequency: 10.0           # /odom 5Hz，10Hz 足够（MPPI 要求 model_dt 与它一致）
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.5        # 差速车: vy 一律视为 0
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 0.3
+    progress_checker_plugin: "progress_checker"
+    goal_checker_plugins: ["general_goal_checker"]
+    controller_plugins: ["FollowPath"]
+    odom_topic: /odom
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.5
+      movement_time_allowance: 10.0
+
+    general_goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      xy_goal_tolerance: 0.15            # 差速车没法侧移修正，放宽一点
+      yaw_goal_tolerance: 0.25
+      stateful: True
+
+    FollowPath:
+      plugin: "nav2_mppi_controller::MPPIController"
+      time_steps: 56
+      model_dt: 0.1                      # 必须 = 1/controller_frequency（这里是 1/10.0），
+                                         # 否则 MPPI configure 阶段直接报错退出
+      batch_size: 1000                   # 香橙派 CPU 有限，MPPI 采样数减半
+      vx_std: 0.20
+      vy_std: 0.0                        # 差速: 不采样横移
+      wz_std: 0.40
+      vx_max: 0.20                       # 本车最高 0.3（桥接夹的），留余量
+      vx_min: -0.15
+      vy_max: 0.0                        # 差速: 不能横移
+      wz_max: 1.2
+      iteration_count: 1
+      prune_distance: 1.7
+      transform_tolerance: 5.0        # 串口链路有延迟，放宽
+      temperature: 0.3
+      gamma: 0.015
+      motion_model: "DiffDrive"          # ⭐ 本车差速，不能横移
+      visualize: true
+      reset_period: 1.0                  # 0 disables; reset MPPI internals if no goal received
+      regenerate_noises: false
+      TrajectoryVisualizer:
+        trajectory_step: 5
+        time_step: 3
+      AckermannConstraints:
+        min_turning_r: 0.0
+      critics:
+        - "ConstraintCritic"
+        - "CostCritic"
+        - "GoalCritic"
+        - "GoalAngleCritic"
+        - "PathAlignCritic"
+        - "PathFollowCritic"
+        - "PathAngleCritic"
+        - "PreferForwardCritic"
+      ConstraintCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0
+      GoalCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        threshold_to_consider: 1.4
+      GoalAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.0
+        threshold_to_consider: 0.5
+      PreferForwardCritic:                # 差速车本来就朝前走，保持启用
+        enabled: true                      # 权重用 Nav2 常用值即可
+        cost_power: 1
+        cost_weight: 10.0
+        threshold_to_consider: 0.5
+      CostCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.81
+        critical_cost: 300.0
+        consider_footprint: true            # 用 footprint 多边形做碰撞检测（见 costmap 段）
+        collision_cost: 1000000.0
+        near_goal_distance: 1.0
+        trajectory_point_step: 2
+      PathAlignCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 14.0
+        max_path_occupancy_ratio: 0.05
+        trajectory_point_step: 4
+        threshold_to_consider: 0.5
+        offset_from_furthest: 20
+        use_path_orientations: false
+      PathFollowCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        offset_from_furthest: 5
+        threshold_to_consider: 1.4
+      PathAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0
+        offset_from_furthest: 4
+        threshold_to_consider: 0.5
+        max_angle_to_furthest: 1.0
+        forward_preference: true
+
+# -----------------------------------------------------------------------------
+# Local Costmap (车身周围 3x3 m 滚动窗口)
+# -----------------------------------------------------------------------------
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: false
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: odom
+      robot_base_frame: base_link
+      rolling_window: true
+      width: 3
+      height: 3
+      resolution: 0.05
+      # 本车 footprint 从 CAD mesh 量的（车头/雷达侧伸到 +0.19，车尾 -0.06，两侧 ±0.11）。
+      # 长方形比外接圆敏感得多：只在真会撞的方向上留空间。
+      # 注意: 写了 footprint 之后 robot_radius 不再起作用。
+      footprint: "[[-0.06, -0.11], [0.19, -0.11], [0.19, 0.11], [-0.06, 0.11]]"
+      plugins: ["obstacle_layer", "inflation_layer"]
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: true
+          marking: true
+          data_type: "LaserScan"
+          raytrace_max_range: 8.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 6.0
+          obstacle_min_range: 0.0
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.35
+      always_send_full_costmap: true
+
+# -----------------------------------------------------------------------------
+# Global Costmap (订阅 slam_toolbox /map)
+# -----------------------------------------------------------------------------
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: false
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      global_frame: map
+      robot_base_frame: base_link        # ⭐ 与 slam_toolbox base_frame 一致
+      footprint: "[[-0.06, -0.11], [0.19, -0.11], [0.19, 0.11], [-0.06, 0.11]]"
+      track_unknown_space: true
+      rolling_window: false
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true     # ⭐ 匹配 slam_toolbox latched 发布
+        subscribe_to_updates: true               # ⭐ 接收 /map_updates, online SLAM 关键
+        transform_tolerance: 0.5
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: true
+          marking: true
+          data_type: "LaserScan"
+          raytrace_max_range: 8.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 6.0
+          obstacle_min_range: 0.0
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.35
+      always_send_full_costmap: true
+
+# -----------------------------------------------------------------------------
+# Planner Server (NavfnPlanner = A*)
+# -----------------------------------------------------------------------------
+planner_server:
+  ros__parameters:
+    use_sim_time: false
+    expected_planner_frequency: 1.0
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+      tolerance: 0.5
+      use_astar: true
+      allow_unknown: true                  # online SLAM: 允许穿越未知区域
+
+# -----------------------------------------------------------------------------
+# Behavior Server (Recovery 行为)
+# -----------------------------------------------------------------------------
+behavior_server:
+  ros__parameters:
+    use_sim_time: false
+    local_costmap_topic: local_costmap/costmap_raw
+    global_costmap_topic: global_costmap/costmap_raw
+    local_footprint_topic: local_costmap/published_footprint
+    global_footprint_topic: global_costmap/published_footprint
+    cycle_frequency: 10.0
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
+    spin:
+      plugin: "nav2_behaviors/Spin"
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+    drive_on_heading:
+      plugin: "nav2_behaviors/DriveOnHeading"
+    wait:
+      plugin: "nav2_behaviors/Wait"
+    assisted_teleop:
+      plugin: "nav2_behaviors/AssistedTeleop"
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_link
+    transform_tolerance: 0.3             # 串口链路有延迟，放宽一点
+    simulate_ahead_time: 2.0
+    max_rotational_vel: 1.0
+    min_rotational_vel: 0.4
+    rotational_acc_lim: 3.2
+
+# -----------------------------------------------------------------------------
+# Velocity Smoother (cmd_vel 平滑)
+# -----------------------------------------------------------------------------
+velocity_smoother:
+  ros__parameters:
+    use_sim_time: false
+    smoothing_frequency: 20.0
+    scale_velocities: false
+    feedback: "OPEN_LOOP"
+    max_velocity: [0.20, 0.0, 1.2]       # 与 MPPI 的 vx_max / wz_max 一致；差速 vy=0
+    min_velocity: [-0.15, 0.0, -1.2]
+    max_accel: [2.5, 2.5, 3.2]
+    max_decel: [-2.5, -2.5, -3.2]
+    odom_topic: "odom"
+    odom_duration: 0.1
+    deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 1.0
+
+# -----------------------------------------------------------------------------
+# Waypoint Follower (多点导航, 可选)
+# -----------------------------------------------------------------------------
+waypoint_follower:
+  ros__parameters:
+    use_sim_time: false
+    loop_rate: 20
+    stop_on_failure: false
+    waypoint_task_executor_plugin: "wait_at_waypoint"
+    wait_at_waypoint:
+      plugin: "nav2_waypoint_follower::WaitAtWaypoint"
+      enabled: true
+      waypoint_pause_duration: 200
+
+# =============================================================================
+# 说明: 本文件不含 amcl / map_server 配置段 —— "有地图导航"用 slam_toolbox
+#   localization 加载 .posegraph/.data 并发布 map→odom TF 与 /map。
+# =============================================================================
